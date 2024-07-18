@@ -1,75 +1,54 @@
-import csv
-import os
-import requests
-import pandas as pd
-from bs4 import BeautifulSoup
+import requests  # Thư viện để gửi yêu cầu HTTP
+import csv  # Thư viện để làm việc với tệp CSV
+import os  # Thư viện để xử lý các thao tác với tệp và thư mục
+import pandas as pd  # Thư viện để xử lý và phân tích dữ liệu
+from bs4 import BeautifulSoup  # Thư viện để phân tích cú pháp HTML
+import time  # Thư viện để sử dụng các hàm thời gian
 
-def fetch_courses(url):
-    """Gửi yêu cầu GET tới URL và trả về nội dung HTML nếu thành công."""
-    try:
-        response = requests.get(url)
-        response.raise_for_status()  # Kiểm tra lỗi HTTP
-        return response.text
-    except requests.RequestException as e:
-        print(f"Lỗi khi truy cập trang web: {e}")
-        return None
-
-def parse_courses(html):
-    """Phân tích HTML và trả về danh sách tiêu đề, thông tin và danh mục."""
-    soup = BeautifulSoup(html, 'html.parser')
-    title_link = soup.select("h2.course-loop-title.course-loop-title-collapse-2-rows a")
-    info = soup.select("div.course-loop-meta-list .meta-value")
-    category = soup.select(".course-loop-category a")
+# Hàm để thu thập dữ liệu từ trang web
+def scrape_quotes(page_count):
+    url_base = "https://quotes.toscrape.com"  # Địa chỉ cơ sở của trang web
     
-    inFo = [k.get_text(strip=True) for k in info]
-    categorys = [value.get_text(strip=True) for value in category]
-    
-    return title_link, inFo, categorys
-
-def save_to_csv(fn, title_link, inFo, categorys):
-    """Ghi dữ liệu vào file CSV."""
-    with open(fn, mode='w', encoding='utf-8', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(['STT', 'Title', 'Link', 'Category', 'Lessons', 'Hours', 'Level'])
+    # Mở tệp CSV để ghi dữ liệu
+    with open("Data.csv", "w", encoding='utf-8', newline='') as file:
+        writer = csv.writer(file)  # Tạo đối tượng ghi vào tệp CSV
+        writer.writerow(["quote", "author", "tags"])  # Ghi tiêu đề cho các cột
         
-        for index, title in enumerate(title_link):
-            l = inFo[index * 3:(index + 1) * 3]  # Lấy 3 giá trị cho mỗi khóa học
-            row = [index + 1, title.get_text(strip=True), title["href"], categorys[index], *l]
-            writer.writerow(row)
+        # Vòng lặp qua số trang đã chỉ định
+        for page in range(1, page_count + 1):
+            url = f"{url_base}/page/{page}"  # Tạo URL cho trang hiện tại
+            try:
+                response = requests.get(url)  # Gửi yêu cầu GET đến URL
+                response.raise_for_status()  # Kiểm tra mã trạng thái phản hồi
+            except requests.RequestException as e:
+                print(f"Error fetching page {page}: {e}")  # In lỗi nếu có
+                continue  # Tiếp tục với trang tiếp theo
+            
+            soup = BeautifulSoup(response.content, 'html.parser')  # Phân tích cú pháp HTML
+            quotes = soup.find_all("div", class_="quote")  # Tìm tất cả các trích dẫn
+            
+            # Vòng lặp qua từng trích dẫn
+            for quote in quotes:
+                text = quote.find("span", class_="text").text  # Lấy nội dung trích dẫn
+                author = quote.find("small", class_="author").text  # Lấy tên tác giả
+                
+                tags = []  # Khởi tạo danh sách chứa các tag
+                tags_div = quote.find("div", class_="tags")  # Tìm phần chứa các tag
+                if tags_div:
+                    all_tag_a = tags_div.find_all('a')  # Lấy tất cả các thẻ <a> trong phần tags
+                    tags = [tag.get_text() for tag in all_tag_a]  # Lấy nội dung của các tag
+                
+                writer.writerow([text, author, ", ".join(tags)])  # Ghi dữ liệu vào tệp CSV
+            
+            time.sleep(1)  # Tạm dừng 1 giây để tránh quá tải máy chủ
 
-def convert_csv_to_excel(csv_file, excel_file):
-    """Đọc file CSV và lưu dưới dạng file Excel, sau đó xóa file CSV."""
-    try:
-        df = pd.read_csv(csv_file, encoding='utf-8')
-        df.to_excel(excel_file, index=False)
-        os.remove(csv_file)
-    except Exception as e:
-        print(f"Lỗi khi chuyển đổi CSV sang Excel: {e}")
-
-def main():
-    base_url = "https://tuhoc.cc/home-page/courses"
-    pages = [1, 2]  # Số trang cần lấy dữ liệu
-    all_title_link = []
-    all_inFo = []
-    all_categorys = []
-
-    for page in pages:
-        url = f"{base_url}/page/{page}/"
-        html = fetch_courses(url)
-        
-        if html:
-            title_link, inFo, categorys = parse_courses(html)
-            all_title_link.extend(title_link)
-            all_inFo.extend(inFo)
-            all_categorys.extend(categorys)
-
-    # Kiểm tra tính hợp lệ của dữ liệu
-    if len(all_title_link) == len(all_categorys) == len(all_inFo) // 3:
-        csv_file = "Khóa học Tuhoc.cc.csv"
-        save_to_csv(csv_file, all_title_link, all_inFo, all_categorys)
-        convert_csv_to_excel(csv_file, 'Khóa học Tuhoc.cc.xlsx')
-    else:
-        print("Dữ liệu không hợp lệ: Vui lòng kiểm tra lại.")
+# Hàm để chuyển đổi tệp CSV thành tệp Excel
+def convert_to_excel():
+    df = pd.read_csv("Data.csv", encoding='utf-8')  # Đọc tệp CSV vào DataFrame
+    df.to_excel("Data.xlsx", index=False)  # Lưu DataFrame vào tệp Excel
+    os.remove("Data.csv")  # Xóa tệp CSV sau khi chuyển đổi
 
 if __name__ == "__main__":
-    main()
+    page_count = 10  # Số trang cần thu thập dữ liệu
+    scrape_quotes(page_count)  # Gọi hàm thu thập dữ liệu
+    convert_to_excel()  # Gọi hàm chuyển đổi tệp sang Excel
